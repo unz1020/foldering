@@ -5,7 +5,9 @@ mod transactions;
 mod watcher;
 
 use config::{load_workspace_config, save_workspace_config};
-use review::{get_default_watch_locations, get_review_queue};
+use review::{
+    get_default_watch_locations, get_file_preview, get_review_queue, open_candidate_file,
+};
 use scanner::{scan_workspace, ScanReport};
 use std::path::PathBuf;
 use transactions::{list_recent_transactions, move_file_review, undo_transaction};
@@ -20,6 +22,7 @@ fn scan_folder(root_path: String) -> Result<ScanReport, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(WatcherState::default())
         .invoke_handler(tauri::generate_handler![
             scan_folder,
@@ -27,6 +30,8 @@ pub fn run() {
             save_workspace_config,
             get_default_watch_locations,
             get_review_queue,
+            get_file_preview,
+            open_candidate_file,
             move_file_review,
             undo_transaction,
             list_recent_transactions,
