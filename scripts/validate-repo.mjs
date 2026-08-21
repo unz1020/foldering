@@ -69,7 +69,10 @@ const reviewSource = await readFile(
   path.join(root, "apps/desktop/src-tauri/src/review.rs"),
   "utf8",
 );
-if (!reviewSource.includes("Archive is never a normal filing recommendation")) {
+const archiveRecommendationGuard = `if name == ARCHIVE_NAME {
+            continue;
+        }`;
+if (!reviewSource.includes(archiveRecommendationGuard)) {
   throw new Error("Archive recommendation exclusion is missing.");
 }
 
