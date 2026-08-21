@@ -4,6 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type CompositionEvent,
+  type ChangeEvent,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -76,6 +78,12 @@ type FileTransaction = {
   originalTransactionId: string | null;
 };
 
+type TextInputProps = {
+  value: string;
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+};
+
 const defaultSchema: FolderSchema = {
   id: "custom-default",
   name: "내 폴더 구조",
@@ -107,6 +115,56 @@ const stepLabels: Array<{ id: Step; label: string }> = [
   { id: "done", label: "완료" },
 ];
 
+function ImeTextInput({ value, onValueChange, placeholder }: TextInputProps) {
+  const [draft, setDraft] = useState(value);
+  const composing = useRef(false);
+
+  useEffect(() => {
+    if (!composing.current) setDraft(value);
+  }, [value]);
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.currentTarget.value;
+    setDraft(next);
+    if (!composing.current) onValueChange(next);
+  }
+
+  function handleCompositionStart() {
+    composing.current = true;
+  }
+
+  function handleCompositionEnd(event: CompositionEvent<HTMLInputElement>) {
+    composing.current = false;
+    const next = event.currentTarget.value;
+    setDraft(next);
+    onValueChange(next);
+  }
+
+  return (
+    <input
+      value={draft}
+      placeholder={placeholder}
+      onChange={handleChange}
+      onCompositionStart={handleCompositionStart}
+      onCompositionEnd={handleCompositionEnd}
+      spellCheck={false}
+    />
+  );
+}
+
+function normalizeWorkspaceForSave(workspace: WorkspaceDraft): WorkspaceDraft {
+  return {
+    ...workspace,
+    schema: {
+      ...workspace.schema,
+      levels: workspace.schema.levels.map((level) => ({
+        ...level,
+        examples: level.examples.map((value) => value.trim()).filter(Boolean),
+      })),
+    },
+  };
+}
+
 function App() {
   const [mode, setMode] = useState<AppMode>("onboarding");
   const [hydrating, setHydrating] = useState(true);
@@ -135,6 +193,7 @@ function App() {
         }
       })
       .finally(() => active && setHydrating(false));
+
     return () => {
       active = false;
     };
@@ -224,7 +283,7 @@ function App() {
 
   async function runScan() {
     if (!workspace.root.trim()) {
-      setScanError("먼저 Workspace 폴더를 선택하세요.");
+      setScanError("먼저 Workspace 폴더를 선택하거나 경로를 입력하세요.");
       return;
     }
 
@@ -254,7 +313,9 @@ function App() {
   }
 
   async function finishOnboarding() {
-    await invoke("save_workspace_config", { config: workspace });
+    const normalized = normalizeWorkspaceForSave(workspace);
+    setWorkspace(normalized);
+    await invoke("save_workspace_config", { config: normalized });
     localStorage.removeItem("5level:onboarding-draft");
     setMode("review");
   }
@@ -315,15 +376,15 @@ function App() {
         </div>
         <div className="sidebarNote">
           <span className="statusDot" />
-          V0.2.1 Review Mode
-          <small>이동은 승인 후에만 실행됩니다.</small>
+          Review Mode
+          <small>관련 파일만 표시 · 이동은 승인 후 실행</small>
         </div>
       </aside>
 
       <section className="content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">ONBOARDING / V0.2.1</p>
+            <p className="eyebrow">ONBOARDING</p>
             <h1>{pageTitle(step)}</h1>
           </div>
           <span className="pill">Local only</span>
@@ -338,10 +399,10 @@ function App() {
 
             <label className="field">
               <span>Workspace 이름</span>
-              <input
+              <ImeTextInput
                 value={workspace.name}
-                onChange={(event) =>
-                  setWorkspace((current) => ({ ...current, name: event.target.value }))
+                onValueChange={(name) =>
+                  setWorkspace((current) => ({ ...current, name }))
                 }
                 placeholder="예: 내 업무"
               />
@@ -350,8 +411,18 @@ function App() {
             <label className="field">
               <span>Workspace 폴더</span>
               <div className="pathRow">
-                <input value={workspace.root} readOnly placeholder="폴더를 선택하세요" />
-                <button className="secondary" type="button" onClick={chooseRoot}>폴더 선택</button>
+                <ImeTextInput
+                  value={workspace.root}
+                  onValueChange={(root) => {
+                    setWorkspace((current) => ({ ...current, root }));
+                    setScan(null);
+                    setScanError(null);
+                  }}
+                  placeholder="폴더 경로를 입력하거나 선택하세요"
+                />
+                <button className="secondary" type="button" onClick={chooseRoot}>
+                  폴더 선택
+                </button>
               </div>
             </label>
 
@@ -360,17 +431,33 @@ function App() {
                 <input
                   type="checkbox"
                   checked={workspace.watchDownloads}
-                  onChange={(event) => setWorkspace((current) => ({ ...current, watchDownloads: event.target.checked }))}
+                  onChange={(event) =>
+                    setWorkspace((current) => ({
+                      ...current,
+                      watchDownloads: event.target.checked,
+                    }))
+                  }
                 />
-                <div><strong>Downloads</strong><span>다운로드 폴더 최상위 파일 감시</span></div>
+                <div>
+                  <strong>Downloads</strong>
+                  <span>관련성이 확인된 최상위 파일만 Review에 표시</span>
+                </div>
               </label>
               <label className="checkCard">
                 <input
                   type="checkbox"
                   checked={workspace.watchDesktop}
-                  onChange={(event) => setWorkspace((current) => ({ ...current, watchDesktop: event.target.checked }))}
+                  onChange={(event) =>
+                    setWorkspace((current) => ({
+                      ...current,
+                      watchDesktop: event.target.checked,
+                    }))
+                  }
                 />
-                <div><strong>Desktop</strong><span>바탕화면 최상위 파일 감시</span></div>
+                <div>
+                  <strong>Desktop</strong>
+                  <span>관련성이 확인된 최상위 파일만 Review에 표시</span>
+                </div>
               </label>
             </div>
           </div>
@@ -379,39 +466,88 @@ function App() {
         {step === "schema" && (
           <div className="stack">
             <div className="panel presetBar">
-              <div><strong>빠른 시작</strong><span>광고대행사 기본 구조를 불러온 뒤 자유롭게 수정할 수 있습니다.</span></div>
-              <button className="secondary" type="button" onClick={applyAdvertisingPreset} disabled={loadingPreset}>
+              <div>
+                <strong>빠른 시작</strong>
+                <span>광고대행사 기본 구조를 불러온 뒤 직접 수정할 수 있습니다.</span>
+              </div>
+              <button
+                className="secondary"
+                type="button"
+                onClick={applyAdvertisingPreset}
+                disabled={loadingPreset}
+              >
                 {loadingPreset ? "불러오는 중…" : "광고대행사 Preset"}
               </button>
             </div>
+
             <div className="levelList">
               {workspace.schema.levels.map((level, index) => (
-                <div className="panel levelCard" key={`${level.key}-${index}`}>
+                <div className="panel levelCard" key={level.key}>
                   <div className="levelHeader">
-                    <div><span className="levelNumber">{index + 1}</span><strong>Level {index + 1}</strong></div>
+                    <div>
+                      <span className="levelNumber">{index + 1}</span>
+                      <strong>Level {index + 1}</strong>
+                    </div>
                     <div className="levelActions">
                       <button type="button" onClick={() => moveLevel(index, -1)} disabled={index === 0}>↑</button>
                       <button type="button" onClick={() => moveLevel(index, 1)} disabled={index === workspace.schema.levels.length - 1}>↓</button>
                       <button type="button" onClick={() => removeLevel(index)} disabled={workspace.schema.levels.length === 1}>삭제</button>
                     </div>
                   </div>
-                  <label className="field"><span>분류 이름</span><input value={level.name} onChange={(e) => updateLevel(index, { name: e.target.value })} /></label>
-                  <label className="field"><span>설명</span><input value={level.description} onChange={(e) => updateLevel(index, { description: e.target.value })} /></label>
-                  <label className="field"><span>예시 (쉼표 구분)</span><input value={level.examples.join(", ")} onChange={(e) => updateLevel(index, { examples: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} /></label>
+
+                  <label className="field">
+                    <span>분류 이름</span>
+                    <ImeTextInput
+                      value={level.name}
+                      onValueChange={(name) => updateLevel(index, { name })}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>설명</span>
+                    <ImeTextInput
+                      value={level.description}
+                      onValueChange={(description) => updateLevel(index, { description })}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>예시 (쉼표 구분)</span>
+                    <ImeTextInput
+                      value={level.examples.join(",")}
+                      onValueChange={(raw) =>
+                        updateLevel(index, { examples: raw.split(",") })
+                      }
+                      placeholder="예: 자코모, 교원웰스, 솔테라이브러리"
+                    />
+                  </label>
                 </div>
               ))}
             </div>
-            <button className="addLevel" type="button" onClick={addLevel} disabled={workspace.schema.levels.length >= MAX_MANAGED_DEPTH}>
+
+            <button
+              className="addLevel"
+              type="button"
+              onClick={addLevel}
+              disabled={workspace.schema.levels.length >= MAX_MANAGED_DEPTH}
+            >
               + Level 추가 ({workspace.schema.levels.length} / {MAX_MANAGED_DEPTH})
             </button>
-            {!schemaValidation.valid && <div className="errorBox">{schemaValidation.errors.join(" · ")}</div>}
+            {!schemaValidation.valid && (
+              <div className="errorBox">{schemaValidation.errors.join(" · ")}</div>
+            )}
           </div>
         )}
 
         {step === "scan" && (
           <div className="panel stack">
-            <div className="introCopy"><h2>기존 폴더를 먼저 읽기 전용으로 검사합니다.</h2><p>이 단계에서는 폴더명·번호·위치를 절대 변경하지 않습니다.</p></div>
-            <button className="primary" type="button" onClick={runScan} disabled={scanning}>{scanning ? "검사 중…" : "폴더 건강검진 실행"}</button>
+            <div className="introCopy">
+              <h2>기존 폴더를 먼저 읽기 전용으로 검사합니다.</h2>
+              <p>이 단계에서는 폴더명·번호·위치를 절대 변경하지 않습니다.</p>
+            </div>
+            <button className="primary" type="button" onClick={runScan} disabled={scanning}>
+              {scanning ? "검사 중…" : "폴더 건강검진 실행"}
+            </button>
             {scanError && <div className="errorBox">{scanError}</div>}
             {scan && (
               <div className="metricGrid">
@@ -429,9 +565,10 @@ function App() {
         {step === "rules" && (
           <div className="panel rulesPanel">
             <Rule title="최대 5-Level" description="Workspace 아래 관리 폴더는 최대 5단계입니다." />
-            <Rule title="01~98 활성 폴더" description="99는 99_ARCHIVE 전용으로 예약합니다." />
-            <Rule title="신규 폴더 승인 필수" description="V0.2.1은 신규 폴더를 아예 생성하지 않습니다." />
-            <Rule title="추천 ≠ 이동" description="현재 Review Mode에서는 모든 파일 이동에 명시적 승인이 필요합니다." />
+            <Rule title="01~98 활성 폴더" description={`99는 ${ARCHIVE_FOLDER_NAME} 전용으로 예약합니다.`} />
+            <Rule title="신규 폴더 승인 필수" description="현재 버전은 신규 폴더를 자동 생성하지 않습니다." />
+            <Rule title="관련 파일만 Review" description="기존 Workspace 구조와 의미 있는 일치가 없는 Downloads/Desktop 파일은 표시하지 않습니다." />
+            <Rule title="추천 ≠ 이동" description="Review Mode의 모든 파일 이동에는 명시적 승인이 필요합니다." />
             <Rule title="덮어쓰기 금지" description="같은 이름 파일이 목적지에 존재하면 이동하지 않습니다." />
             <Rule title="Undo" description="승인한 이동은 로컬 Transaction Log에 기록됩니다." />
           </div>
@@ -440,16 +577,27 @@ function App() {
         {step === "done" && (
           <div className="panel donePanel">
             <div className="doneIcon">✓</div>
-            <p className="eyebrow">V0.2.1 READY</p>
+            <p className="eyebrow">READY</p>
             <h2>{workspace.name} 설정이 준비되었습니다.</h2>
-            <p>Review Mode에서 Downloads/Desktop 파일을 확인하고, 기존 폴더로 이동하기 전에 직접 승인합니다.</p>
-            <button className="primary" type="button" onClick={finishOnboarding}>Review Mode 시작</button>
+            <p>
+              Review Mode에는 Workspace 구조와 관련성이 확인된 파일만 표시되며,
+              이동 전에는 직접 승인합니다.
+            </p>
+            <button className="primary" type="button" onClick={finishOnboarding}>
+              Review Mode 시작
+            </button>
           </div>
         )}
 
         <footer className="footerNav">
-          <button className="secondary" type="button" onClick={back} disabled={step === "workspace"}>이전</button>
-          {step !== "done" && <button className="primary" type="button" onClick={next} disabled={!canContinue}>다음</button>}
+          <button className="secondary" type="button" onClick={back} disabled={step === "workspace"}>
+            이전
+          </button>
+          {step !== "done" && (
+            <button className="primary" type="button" onClick={next} disabled={!canContinue}>
+              다음
+            </button>
+          )}
         </footer>
       </section>
     </main>
@@ -561,7 +709,11 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
   }
 
   async function chooseDestination(candidate: FileCandidate) {
-    const selected = await open({ directory: true, multiple: false, defaultPath: workspace.root });
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: workspace.root,
+    });
     if (typeof selected === "string") await moveCandidate(candidate, selected);
   }
 
@@ -569,7 +721,9 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
     setUndoingId(transaction.id);
     setNotice(null);
     try {
-      await invoke<FileTransaction>("undo_transaction", { transactionId: transaction.id });
+      await invoke<FileTransaction>("undo_transaction", {
+        transactionId: transaction.id,
+      });
       setNotice("파일을 원래 위치로 되돌렸습니다.");
       await Promise.all([refreshQueue(), refreshTransactions()]);
     } catch (error) {
@@ -580,15 +734,15 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
   }
 
   const undoneIds = useMemo(
-    () => new Set(
-      transactions
-        .filter((item) => item.kind === "UNDO" && item.originalTransactionId)
-        .map((item) => item.originalTransactionId as string),
-    ),
+    () =>
+      new Set(
+        transactions
+          .filter((item) => item.kind === "UNDO" && item.originalTransactionId)
+          .map((item) => item.originalTransactionId as string),
+      ),
     [transactions],
   );
   const recentMoves = transactions.filter((item) => item.kind === "MOVE").slice(0, 8);
-  const recommendationCount = candidates.filter((item) => item.recommendations.length > 0).length;
 
   return (
     <main className="shell reviewShell">
@@ -602,25 +756,30 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
         <div className="sidebarNote">
           <span className="statusDot" />
           {watcherCount > 0 ? `${watcherCount}곳 감시 중` : "감시 준비 중"}
-          <small>최상위 파일만 · 로컬 처리</small>
+          <small>관련 파일만 · 최상위 파일만 · 로컬 처리</small>
         </div>
       </aside>
 
       <section className="content reviewContent">
         <header className="topbar reviewTopbar">
           <div>
-            <p className="eyebrow">REVIEW MODE / V0.2.1</p>
+            <p className="eyebrow">REVIEW MODE</p>
             <h1>{workspace.name}</h1>
             <p className="workspacePath">{workspace.root}</p>
           </div>
-          <button className="secondary" type="button" onClick={() => void refreshQueue()} disabled={loading}>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => void refreshQueue()}
+            disabled={loading}
+          >
             {loading ? "확인 중…" : "새로고침"}
           </button>
         </header>
 
         <div className="reviewMetrics">
-          <div><span>확인 필요</span><strong>{candidates.length}</strong></div>
-          <div><span>추천 경로 있음</span><strong>{recommendationCount}</strong></div>
+          <div><span>승인 필요</span><strong>{candidates.length}</strong></div>
+          <div><span>관련 파일</span><strong>{candidates.length}</strong></div>
           <div><span>감시 위치</span><strong>{watchLocations.length}</strong></div>
         </div>
 
@@ -630,19 +789,19 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
         <section className="reviewSection">
           <div className="sectionHeading">
             <div>
-              <p className="eyebrow">INBOX</p>
-              <h2>파일 확인</h2>
+              <p className="eyebrow">RELATED INBOX</p>
+              <h2>관련 파일 확인</h2>
             </div>
             <span className="pill">승인 전 이동 없음</span>
           </div>
 
           {loading ? (
-            <div className="emptyState"><strong>파일을 확인하고 있습니다…</strong></div>
+            <div className="emptyState"><strong>관련 파일을 확인하고 있습니다…</strong></div>
           ) : candidates.length === 0 ? (
             <div className="emptyState successEmpty">
               <div className="emptyIcon">✓</div>
-              <strong>현재 확인할 파일이 없습니다.</strong>
-              <span>Downloads/Desktop에 새 파일이 생기면 자동으로 다시 확인합니다.</span>
+              <strong>현재 승인할 관련 파일이 없습니다.</strong>
+              <span>Downloads/Desktop의 관련 없는 파일은 표시하지 않고 그대로 둡니다.</span>
             </div>
           ) : (
             <div className="candidateList">
@@ -689,7 +848,11 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
                         disabled={undone || undoingId === transaction.id}
                         onClick={() => void undo(transaction)}
                       >
-                        {undone ? "되돌림 완료" : undoingId === transaction.id ? "되돌리는 중…" : "Undo"}
+                        {undone
+                          ? "되돌림 완료"
+                          : undoingId === transaction.id
+                            ? "되돌리는 중…"
+                            : "Undo"}
                       </button>
                     </div>
                   </div>
@@ -714,8 +877,12 @@ function CandidateCard({
   onApprove: (destination: string) => void;
   onChoose: () => void;
 }) {
-  const [selectedPath, setSelectedPath] = useState(candidate.recommendations[0]?.path ?? "");
-  const selected = candidate.recommendations.find((item) => item.path === selectedPath);
+  const [selectedPath, setSelectedPath] = useState(
+    candidate.recommendations[0]?.path ?? "",
+  );
+  const selected = candidate.recommendations.find(
+    (item) => item.path === selectedPath,
+  );
 
   useEffect(() => {
     setSelectedPath(candidate.recommendations[0]?.path ?? "");
@@ -723,42 +890,45 @@ function CandidateCard({
 
   return (
     <article className="candidateCard">
-      <div className="fileGlyph">{candidate.extension ? candidate.extension.slice(0, 4).toUpperCase() : "FILE"}</div>
+      <div className="fileGlyph">
+        {candidate.extension ? candidate.extension.slice(0, 4).toUpperCase() : "FILE"}
+      </div>
       <div className="candidateMain">
         <div className="fileTitleRow">
           <div>
             <strong>{candidate.fileName}</strong>
-            <span>{candidate.sourceLabel} · {formatBytes(candidate.sizeBytes)} · {formatDate(candidate.modifiedAtMs)}</span>
+            <span>
+              {candidate.sourceLabel} · {formatBytes(candidate.sizeBytes)} · {formatDate(candidate.modifiedAtMs)}
+            </span>
           </div>
           <span className="sourceBadge">{candidate.sourceLabel}</span>
         </div>
 
-        {candidate.recommendations.length > 0 ? (
-          <div className="recommendationBox">
-            <div className="recommendationTop">
-              <span>추천 기존 폴더</span>
-              {selected && <strong>{Math.round(selected.score * 100)}% 일치</strong>}
+        <div className="recommendationBox">
+          <div className="recommendationTop">
+            <span>추천 기존 폴더</span>
+            {selected && <strong>{Math.round(selected.score * 100)}% 일치</strong>}
+          </div>
+          <select
+            value={selectedPath}
+            onChange={(event) => setSelectedPath(event.target.value)}
+          >
+            {candidate.recommendations.map((item, index) => (
+              <option value={item.path} key={item.path}>
+                {index + 1}순위 · {item.relativePath}
+              </option>
+            ))}
+          </select>
+          {selected && (
+            <div className="recommendationMeta">
+              <span>Level {selected.depth} / 5</span>
+              <span>매칭: {selected.matchedLabels.join(", ")}</span>
+              {!selected.managed && (
+                <span className="legacyWarning">기존 규칙 위반 경로 · Review 승인만 가능</span>
+              )}
             </div>
-            <select value={selectedPath} onChange={(event) => setSelectedPath(event.target.value)}>
-              {candidate.recommendations.map((item, index) => (
-                <option value={item.path} key={item.path}>
-                  {index + 1}순위 · {item.relativePath}
-                </option>
-              ))}
-            </select>
-            {selected && (
-              <div className="recommendationMeta">
-                <span>Level {selected.depth} / 5</span>
-                <span>매칭: {selected.matchedLabels.join(", ")}</span>
-                {!selected.managed && <span className="legacyWarning">기존 규칙 위반 경로 · Review 승인만 가능</span>}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="noRecommendation">
-            기존 폴더에서 명확한 이름 일치를 찾지 못했습니다. 직접 폴더를 선택할 수 있습니다.
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <div className="candidateActions">
         <button
