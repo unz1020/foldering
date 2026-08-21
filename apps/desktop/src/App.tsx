@@ -10,6 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import FilePreviewButton from "./FilePreviewButton";
 import {
   ARCHIVE_FOLDER_NAME,
   MAX_MANAGED_DEPTH,
@@ -50,6 +51,14 @@ type DefaultWatchLocations = {
   desktop: string | null;
 };
 
+type ParsedFileName = {
+  structured: boolean;
+  agency: string | null;
+  advertiser: string | null;
+  subject: string | null;
+  date: string | null;
+};
+
 type FolderRecommendation = {
   path: string;
   relativePath: string;
@@ -66,6 +75,7 @@ type FileCandidate = {
   sizeBytes: number;
   modifiedAtMs: number;
   sourceLabel: string;
+  parsed: ParsedFileName;
   recommendations: FolderRecommendation[];
 };
 
@@ -377,7 +387,7 @@ function App() {
         <div className="sidebarNote">
           <span className="statusDot" />
           Review Mode
-          <small>관련 파일만 표시 · 이동은 승인 후 실행</small>
+          <small>구조화 파일명 우선 · 이동은 승인 후 실행</small>
         </div>
       </aside>
 
@@ -440,7 +450,7 @@ function App() {
                 />
                 <div>
                   <strong>Downloads</strong>
-                  <span>관련성이 확인된 최상위 파일만 Review에 표시</span>
+                  <span>파일명과 Workspace 폴더가 강하게 일치하는 파일만 표시</span>
                 </div>
               </label>
               <label className="checkCard">
@@ -456,7 +466,7 @@ function App() {
                 />
                 <div>
                   <strong>Desktop</strong>
-                  <span>관련성이 확인된 최상위 파일만 Review에 표시</span>
+                  <span>애매한 파일은 묻지 않고 그대로 제외</span>
                 </div>
               </label>
             </div>
@@ -567,7 +577,8 @@ function App() {
             <Rule title="최대 5-Level" description="Workspace 아래 관리 폴더는 최대 5단계입니다." />
             <Rule title="01~98 활성 폴더" description={`99는 ${ARCHIVE_FOLDER_NAME} 전용으로 예약합니다.`} />
             <Rule title="신규 폴더 승인 필수" description="현재 버전은 신규 폴더를 자동 생성하지 않습니다." />
-            <Rule title="관련 파일만 Review" description="기존 Workspace 구조와 의미 있는 일치가 없는 Downloads/Desktop 파일은 표시하지 않습니다." />
+            <Rule title="파일명 구조 우선" description="자사_광고주_소재명_날짜 패턴을 먼저 해석한 뒤 광고주와 업무 폴더를 순서대로 매칭합니다." />
+            <Rule title="애매하면 제외" description="후보 경로가 비슷하거나 광고주/업무 매칭이 약하면 Review에 표시하지 않습니다." />
             <Rule title="추천 ≠ 이동" description="Review Mode의 모든 파일 이동에는 명시적 승인이 필요합니다." />
             <Rule title="덮어쓰기 금지" description="같은 이름 파일이 목적지에 존재하면 이동하지 않습니다." />
             <Rule title="Undo" description="승인한 이동은 로컬 Transaction Log에 기록됩니다." />
@@ -580,8 +591,8 @@ function App() {
             <p className="eyebrow">READY</p>
             <h2>{workspace.name} 설정이 준비되었습니다.</h2>
             <p>
-              Review Mode에는 Workspace 구조와 관련성이 확인된 파일만 표시되며,
-              이동 전에는 직접 승인합니다.
+              파일명을 자사·광고주·업무·날짜로 해석하고 기존 폴더명과 강하게 맞는 파일만
+              Review에 표시합니다.
             </p>
             <button className="primary" type="button" onClick={finishOnboarding}>
               Review Mode 시작
@@ -756,7 +767,7 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
         <div className="sidebarNote">
           <span className="statusDot" />
           {watcherCount > 0 ? `${watcherCount}곳 감시 중` : "감시 준비 중"}
-          <small>관련 파일만 · 최상위 파일만 · 로컬 처리</small>
+          <small>구조화 파일명 우선 · 애매한 파일 제외</small>
         </div>
       </aside>
 
@@ -779,7 +790,7 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
 
         <div className="reviewMetrics">
           <div><span>승인 필요</span><strong>{candidates.length}</strong></div>
-          <div><span>관련 파일</span><strong>{candidates.length}</strong></div>
+          <div><span>명확한 매칭</span><strong>{candidates.length}</strong></div>
           <div><span>감시 위치</span><strong>{watchLocations.length}</strong></div>
         </div>
 
@@ -789,19 +800,19 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
         <section className="reviewSection">
           <div className="sectionHeading">
             <div>
-              <p className="eyebrow">RELATED INBOX</p>
-              <h2>관련 파일 확인</h2>
+              <p className="eyebrow">MATCHED INBOX</p>
+              <h2>파일명 ↔ 폴더명 매칭</h2>
             </div>
-            <span className="pill">승인 전 이동 없음</span>
+            <span className="pill">애매하면 자동 제외</span>
           </div>
 
           {loading ? (
-            <div className="emptyState"><strong>관련 파일을 확인하고 있습니다…</strong></div>
+            <div className="emptyState"><strong>파일명과 폴더 구조를 비교하고 있습니다…</strong></div>
           ) : candidates.length === 0 ? (
             <div className="emptyState successEmpty">
               <div className="emptyIcon">✓</div>
-              <strong>현재 승인할 관련 파일이 없습니다.</strong>
-              <span>Downloads/Desktop의 관련 없는 파일은 표시하지 않고 그대로 둡니다.</span>
+              <strong>현재 명확하게 구분되는 파일이 없습니다.</strong>
+              <span>구분하기 어려운 파일은 묻지 않고 Downloads/Desktop에 그대로 둡니다.</span>
             </div>
           ) : (
             <div className="candidateList">
@@ -809,6 +820,7 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
                 <CandidateCard
                   key={candidate.path}
                   candidate={candidate}
+                  watchLocations={watchLocations}
                   moving={movingPath === candidate.path}
                   onApprove={(destination) => void moveCandidate(candidate, destination)}
                   onChoose={() => void chooseDestination(candidate)}
@@ -868,11 +880,13 @@ function ReviewMode({ workspace, onSettings }: { workspace: WorkspaceDraft; onSe
 
 function CandidateCard({
   candidate,
+  watchLocations,
   moving,
   onApprove,
   onChoose,
 }: {
   candidate: FileCandidate;
+  watchLocations: string[];
   moving: boolean;
   onApprove: (destination: string) => void;
   onChoose: () => void;
@@ -904,6 +918,15 @@ function CandidateCard({
           <span className="sourceBadge">{candidate.sourceLabel}</span>
         </div>
 
+        {candidate.parsed.structured && (
+          <div className="fileParseRow">
+            <span><small>자사</small>{candidate.parsed.agency}</span>
+            <span><small>광고주</small>{candidate.parsed.advertiser}</span>
+            <span><small>업무/소재</small>{candidate.parsed.subject}</span>
+            {candidate.parsed.date && <span><small>날짜</small>{candidate.parsed.date}</span>}
+          </div>
+        )}
+
         <div className="recommendationBox">
           <div className="recommendationTop">
             <span>추천 기존 폴더</span>
@@ -922,7 +945,7 @@ function CandidateCard({
           {selected && (
             <div className="recommendationMeta">
               <span>Level {selected.depth} / 5</span>
-              <span>매칭: {selected.matchedLabels.join(", ")}</span>
+              <span>폴더명 매칭: {selected.matchedLabels.join(" → ")}</span>
               {!selected.managed && (
                 <span className="legacyWarning">기존 규칙 위반 경로 · Review 승인만 가능</span>
               )}
@@ -931,6 +954,11 @@ function CandidateCard({
         </div>
       </div>
       <div className="candidateActions">
+        <FilePreviewButton
+          filePath={candidate.path}
+          fileName={candidate.fileName}
+          watchLocations={watchLocations}
+        />
         <button
           className="primary"
           type="button"
