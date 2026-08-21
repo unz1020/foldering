@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import "./preview.css";
 
 type FilePreview = {
   kind: "image" | "pdf" | "text" | "unsupported";
