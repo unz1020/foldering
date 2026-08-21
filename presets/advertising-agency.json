@@ -1,0 +1,17 @@
+{
+  "id": "advertising-agency",
+  "name": "광고대행사",
+  "description": "광고주 중심으로 프로젝트, 업무, 매체, 세부항목을 정리하는 시작 템플릿입니다.",
+  "schema": {
+    "id": "advertising-agency-default",
+    "name": "광고대행사 기본 구조",
+    "version": 1,
+    "levels": [
+      {"level":1,"key":"client","name":"광고주","description":"담당하고 있는 회사 또는 브랜드","examples":["브랜드A","브랜드B","광고주C"]},
+      {"level":2,"key":"project","name":"연도 / 프로젝트","description":"연도, 캠페인 또는 프로젝트 단위","examples":["2026","브랜드 캠페인","프로모션"]},
+      {"level":3,"key":"work_type","name":"업무분류","description":"수행하는 주요 업무 종류","examples":["미디어","제작","프로모션","커뮤니케이션"]},
+      {"level":4,"key":"channel","name":"매체 / 채널","description":"매체, 플랫폼 또는 실행 채널","examples":["DV360","Meta","GFA","유튜브"]},
+      {"level":5,"key":"detail","name":"세부항목","description":"마지막 세부 작업 또는 자료 유형","examples":["소재","카피","리포트","레퍼런스"]}
+    ]
+  }
+}

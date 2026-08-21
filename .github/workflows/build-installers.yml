@@ -1,0 +1,65 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: npm install
+      - name: Validate repository invariants
+        run: npm run validate
+      - name: Run Rust safety tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Build MSI and NSIS
+        run: npm run tauri --workspace @5level/desktop -- build --bundles msi,nsis
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldering-windows-x64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  macos-universal:
+    name: macOS universal bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add Apple Silicon and Intel targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install dependencies
+        run: npm install
+      - name: Validate repository invariants
+        run: npm run validate
+      - name: Run Rust safety tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Build universal app and DMG
+        run: npm run tauri --workspace @5level/desktop -- build --target universal-apple-darwin --bundles app,dmg
+      - name: Upload macOS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldering-macos-universal-unsigned
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app/**
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

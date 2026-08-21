@@ -1,0 +1,19 @@
+{
+  "id": "blank",
+  "name": "직접 만들기",
+  "description": "빈 구조에서 내 업무 방식에 맞게 시작합니다.",
+  "schema": {
+    "id": "custom-default",
+    "name": "내 폴더 구조",
+    "version": 1,
+    "levels": [
+      {
+        "level": 1,
+        "key": "level_1",
+        "name": "첫 번째 분류",
+        "description": "가장 먼저 구분하는 기준",
+        "examples": []
+      }
+    ]
+  }
+}

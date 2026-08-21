@@ -1,0 +1,15 @@
+{
+  "name": "5level",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Local-first file organizer with user-defined folder schemas and hard 5-level safety rules.",
+  "workspaces": ["apps/*","packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @5level/desktop",
+    "build": "npm run build --workspace @5level/desktop",
+    "tauri:dev": "npm run tauri --workspace @5level/desktop -- dev",
+    "tauri:build": "npm run tauri --workspace @5level/desktop -- build",
+    "validate": "node scripts/validate-repo.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

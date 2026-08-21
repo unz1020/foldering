@@ -1,0 +1,21 @@
+[package]
+name = "fivelevel"
+version = "0.2.1"
+description = "Local-first 5-Level folder organizer"
+authors = ["5-Level contributors"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "fivelevel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+notify = "8.2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-dialog = "2.7.2"

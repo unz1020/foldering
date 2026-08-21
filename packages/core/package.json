@@ -1,0 +1,12 @@
+{
+  "name": "@5level/core",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@5level/schema": "0.2.1"
+  }
+}
