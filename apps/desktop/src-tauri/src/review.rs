@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 const MAX_DEPTH: usize = 5;
 const MAX_CANDIDATES: usize = 500;
 const MAX_RECOMMENDATIONS: usize = 3;
+const MIN_REVIEW_SCORE: f64 = 0.30;
 const ARCHIVE_NAME: &str = "99_ARCHIVE";
 const PARTIAL_EXTENSIONS: &[&str] = &["crdownload", "part", "download", "tmp"];
 
@@ -117,6 +118,14 @@ pub fn get_review_queue(
                 continue;
             }
 
+            let recommendations = recommend_destinations(&file_name, &destinations);
+            if !is_relevant_candidate(&recommendations) {
+                // Downloads/Desktop can contain installers, screenshots, personal files, etc.
+                // They are intentionally invisible unless the existing Workspace structure
+                // gives us a meaningful filing signal.
+                continue;
+            }
+
             let metadata = match entry.metadata() {
                 Ok(metadata) => metadata,
                 Err(_) => continue,
@@ -134,7 +143,6 @@ pub fn get_review_queue(
                 .unwrap_or("")
                 .to_string();
 
-            let recommendations = recommend_destinations(&file_name, &destinations);
             candidates.push(FileCandidate {
                 path: entry.path().to_string_lossy().into_owned(),
                 file_name,
@@ -269,9 +277,15 @@ fn recommend_destinations(file_name: &str, destinations: &[Destination]) -> Vec<
                 return None;
             }
 
-            if matched_labels.len() >= 2 { score += 0.08; }
-            if matched_labels.len() >= 3 { score += 0.06; }
-            if destination.managed { score += 0.02; }
+            if matched_labels.len() >= 2 {
+                score += 0.08;
+            }
+            if matched_labels.len() >= 3 {
+                score += 0.06;
+            }
+            if destination.managed {
+                score += 0.02;
+            }
             score = f64::min(score, 0.99);
 
             Some(FolderRecommendation {
@@ -286,54 +300,108 @@ fn recommend_destinations(file_name: &str, destinations: &[Destination]) -> Vec<
         .collect();
 
     scored.sort_by(|a, b| {
-        b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal).then_with(|| b.depth.cmp(&a.depth))
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.depth.cmp(&a.depth))
     });
     scored.truncate(MAX_RECOMMENDATIONS);
     scored
 }
 
+fn is_relevant_candidate(recommendations: &[FolderRecommendation]) -> bool {
+    recommendations
+        .first()
+        .map(|recommendation| recommendation.score >= MIN_REVIEW_SCORE)
+        .unwrap_or(false)
+}
+
 fn managed_label(name: &str) -> (bool, String) {
-    if name == ARCHIVE_NAME { return (true, "ARCHIVE".into()); }
+    if name == ARCHIVE_NAME {
+        return (true, "ARCHIVE".into());
+    }
     let bytes = name.as_bytes();
-    if bytes.len() < 4 || !bytes[0].is_ascii_digit() || !bytes[1].is_ascii_digit() || bytes[2] != b'_' {
+    if bytes.len() < 4
+        || !bytes[0].is_ascii_digit()
+        || !bytes[1].is_ascii_digit()
+        || bytes[2] != b'_'
+    {
         return (false, name.to_string());
     }
     let number = ((bytes[0] - b'0') * 10 + (bytes[1] - b'0')) as u8;
     let label = name[3..].trim();
-    if !(1..=98).contains(&number) || label.is_empty() { return (false, label.to_string()); }
+    if !(1..=98).contains(&number) || label.is_empty() {
+        return (false, label.to_string());
+    }
     (true, label.to_string())
 }
 
 fn compact(value: &str) -> String {
-    value.chars().filter(|character| character.is_alphanumeric()).flat_map(|character| character.to_lowercase()).collect()
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(|character| character.to_lowercase())
+        .collect()
 }
 
 fn should_ignore_file(file_name: &str) -> bool {
-    if file_name.starts_with('.') || file_name.starts_with("~$") { return true; }
-    let extension = Path::new(file_name).extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if file_name.starts_with('.') || file_name.starts_with("~$") {
+        return true;
+    }
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     PARTIAL_EXTENSIONS.contains(&extension.as_str())
 }
 
 fn path_for_display(path: &Path) -> String {
-    path.components().map(|component| component.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn system_time_to_ms(time: SystemTime) -> Option<u128> {
-    time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_millis())
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recommendation(score: f64) -> FolderRecommendation {
+        FolderRecommendation {
+            path: "C:/work".into(),
+            relative_path: "01_Client".into(),
+            depth: 1,
+            score,
+            managed: true,
+            matched_labels: vec!["Client".into()],
+        }
+    }
+
     #[test]
     fn strips_numbering_for_matching() {
         assert_eq!(managed_label("03_Channel"), (true, "Channel".into()));
         assert_eq!(managed_label("Channel"), (false, "Channel".into()));
     }
+
     #[test]
     fn ignores_partial_downloads() {
         assert!(should_ignore_file("report.pdf.crdownload"));
         assert!(should_ignore_file("~$report.xlsx"));
         assert!(!should_ignore_file("report.pdf"));
+    }
+
+    #[test]
+    fn only_meaningful_matches_enter_review_queue() {
+        assert!(!is_relevant_candidate(&[]));
+        assert!(!is_relevant_candidate(&[recommendation(0.29)]));
+        assert!(is_relevant_candidate(&[recommendation(0.30)]));
+        assert!(is_relevant_candidate(&[recommendation(0.72)]));
     }
 }
