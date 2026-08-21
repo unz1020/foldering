@@ -260,8 +260,9 @@ pub fn open_candidate_file(
     watch_locations: Vec<String>,
 ) -> Result<(), String> {
     let path = validated_candidate_path(&file_path, &watch_locations)?;
+    let path_string = path.to_string_lossy().into_owned();
     app.opener()
-        .open_path(path, None::<&str>)
+        .open_path(path_string, None::<&str>)
         .map_err(|error| format!("Could not open file: {error}"))
 }
 
@@ -531,7 +532,7 @@ fn recommend_generic(file_name: &str, destinations: &[Destination]) -> Vec<Folde
     destinations
         .iter()
         .filter_map(|destination| {
-            let mut score = 0.0;
+            let mut score: f64 = 0.0;
             let mut matched_labels = Vec::new();
 
             for (index, label) in destination.labels.iter().enumerate() {
